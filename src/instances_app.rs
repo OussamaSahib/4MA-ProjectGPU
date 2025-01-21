@@ -59,28 +59,18 @@ impl Instance {
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x3, // Position
                 },
                 wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 3,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x3, // Couleur
                 },
             ],
         }
     }
 }
 
-
-// Structure pour les paramètres de simulation
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct SimulationParams {
-    sphere_radius: f32,
-    spring_stiffness: f32,
-    damping_factor: f32,
-    _padding: f32,
-}
 
 
 
@@ -112,25 +102,6 @@ impl InstanceApp {
             })
             .collect();
 
-        // Augmenter la taille de la sphère
-        let sphere_instances: Vec<Instance> = positions
-        .iter()
-        .map(|position| Instance {
-            position: (*position * 1.0).into(), // Augmenter la taille
-            color: [1.0, 0.0, 0.0],
-        })
-        .collect();
-
- 
-
-        // // Combinez les deux ensembles d'instances
-        // sphere_instances.extend(plane_instances);
-        let num_instances = sphere_instances.len() as u32;
-        let num_indices = indices.len() as u32;
-
-
-
-
         let index_buffer = context
             .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -139,9 +110,15 @@ impl InstanceApp {
                 usage: wgpu::BufferUsages::INDEX,
             });
 
+        // let instances: Vec<Instance> = positions
+        //     .iter()
+        //     .map(|position| Instance {
+        //         position: (*position).into(),
+        //     })
+        //     .collect();
 
-        
-
+        let num_indices = indices.len() as u32;
+        // let num_instances = instances.len() as u32;
 
         let vertex_buffer =
             context
@@ -152,6 +129,14 @@ impl InstanceApp {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
+        // let instance_buffer =
+        //     context
+        //         .device()
+        //         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //             label: Some("Instance Buffer"),
+        //             contents: bytemuck::cast_slice(instances.as_slice()),
+        //             usage: wgpu::BufferUsages::VERTEX,
+        //         });
 
         let shader = context
             .device()
@@ -234,7 +219,30 @@ impl InstanceApp {
 
 
 
+ // Augmenter la taille de la sphère
+let mut sphere_instances: Vec<Instance> = positions
+.iter()
+.map(|position| Instance {
+    position: (*position * 1.0).into(), // Augmenter la taille
+    color: [1.0, 0.0, 0.0],
+})
+.collect();
 
+// Création d'un plan plus compact
+let plane_size = 5; // Taille réduite
+let mut plane_instances = Vec::new();
+for x in -plane_size..plane_size {
+    for z in -plane_size..plane_size {
+        plane_instances.push(Instance {
+            position: [x as f32 * 0.2, 1.3, z as f32 * 0.2], // Position encore plus proche de la sphère
+            color: [0.0, 0.0, 1.0]
+        });
+    }
+}
+
+// Combinez les deux ensembles d'instances
+sphere_instances.extend(plane_instances);
+let num_instances = sphere_instances.len() as u32;
 
 
 
@@ -251,20 +259,6 @@ impl InstanceApp {
             contents: bytemuck::cast_slice(&sphere_instances),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::VERTEX,
         });
-
-        let simulation_params = SimulationParams {
-            sphere_radius: 1.0,
-            spring_stiffness: 50.0,
-            damping_factor: 0.2,
-            _padding: 0.0,
-        };
-
-        let params_buffer = context.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Simulation Params Buffer"),
-            contents: bytemuck::cast_slice(&[simulation_params]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
 
         let compute_shader = context.device().create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Compute Shader"),
@@ -286,7 +280,7 @@ impl InstanceApp {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Uniform, // Caméra comme buffer uniforme
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -296,17 +290,7 @@ impl InstanceApp {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: false }, // Buffer de stockage
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -316,26 +300,22 @@ impl InstanceApp {
         });
 
         println!("Camera buffer binding created: {:?}", camera.buffer_binding());
-        println!("Instance storage buffer binding created: {:?}", instance_storage_buffer.as_entire_binding());
+println!("Instance storage buffer binding created: {:?}", instance_storage_buffer.as_entire_binding());
         
-        let compute_bind_group = context.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &compute_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera.buffer_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: instance_storage_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-            label: Some("Compute Bind Group"),
-        });
+let compute_bind_group = context.device().create_bind_group(&wgpu::BindGroupDescriptor {
+    layout: &compute_bind_group_layout,
+    entries: &[
+        wgpu::BindGroupEntry {
+            binding: 0, // Binding pour le buffer de la caméra
+            resource: camera.buffer_binding(), // Fournit le buffer de la caméra
+        },
+        wgpu::BindGroupEntry {
+            binding: 1, // Binding pour le buffer des positions d'instances
+            resource: instance_storage_buffer.as_entire_binding(), // Fournit le buffer des instances
+        },
+    ],
+    label: Some("Compute Bind Group"),
+});
 
 
         let compute_pipeline_layout = context.device().create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -411,6 +391,7 @@ impl App for InstanceApp {
         // render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         render_pass.set_vertex_buffer(1, self.instance_storage_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        render_pass.set_bind_group(0, self.camera.bind_group(), &[]);
         render_pass.draw_indexed(0..self.num_indices, 0, 0..self.num_instances);
     }
 }
